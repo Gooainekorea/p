@@ -1,0 +1,316 @@
+import numpy as np
+import pandas as pd
+import json
+import matplotlib.pyplot as plt
+from PIL import Image
+
+
+# config
+base_input_path = '/home/ain/Documents/PlantNet/' # 기본 입력경로 D:\ain\PlantNet
+input_path = f'{base_input_path}plantnet_300K/' # 이미지 "D:\ain\PlantNet\plantnet_300K"
+output_path = f'{base_input_path}output_data/' # 출력결과 "D:\ain\PlantNet\output_data"
+metadata_path = f'{input_path}plantnet300K_metadata.json' # 메타 데이터 파일
+species_names_path = f'{input_path}plantnet300K_species_names.json'#종이름파일
+convert_to_csv = True #csv변환여부
+
+
+if convert_to_csv:
+    metadata = pd.read_json(metadata_path)
+    metadata = metadata.transpose() # w전치
+    metadata = metadata.reset_index() # 열이름을 id로 변환
+    metadata = metadata.rename(columns={"index": "id"})
+    metadata.to_csv(f'{output_path}metadata.csv', index=False)
+
+
+    species_names = pd.read_json(species_names_path, orient="index")
+    species_names = species_names.reset_index()
+    species_names = species_names.rename(columns={"index": "species_id", 0: "species_name"})
+    species_names.to_csv(f'{output_path}species_names.csv', index=False)
+else:
+   # load from pre-converted dataset
+   metadata = pd.read_csv(f'{base_input_path}plantnet-metadata/metadata.csv')
+   species_names = pd.read_csv(f'{base_input_path}plantnet-metadata/species_names.csv')
+
+
+def show_image(path):
+    img = Image.open(f'{input_path}{path}')
+    plt.imshow(img)
+    plt.axis('off')
+    plt.show()
+
+
+def show_tensor_image(tensor):
+    tensor = tensor.detach().numpy().transpose((1, 2, 0))
+    plt.imshow(image_array)
+    plt.axis('off')  # To hide axis values
+    plt.show()
+   
+# show_image('images_train/1355868/01aca26dc4a0b0af7c55ecf84d8772179bf6fd6d.jpg')
+## "D:\ain\PlantNet\plantnet_300K\images\train\1355868\01aca26dc4a0b0af7c55ecf84d8772179bf6fd6d.jpg"
+metadata.info() # 각 열에 대한 정보
+
+
+# json 파일로 데이터 프레임 만들어지는거 확인함 --------------------------------------------------------------
+# 데이터 불균형 확인
+metadata.head() # 헤드확인
+species_names.info()
+
+
+# no numeric data to plot -> 데이터타입이 숫자 타입이 아니라서 못읽고 있음
+#print(metadata['species_id'].dtype)
+metadata['species_id'] = pd.to_numeric(metadata['species_id'])
+#print(metadata['species_id'].dtype)
+
+
+#metadata['species_id'].plot(kind='hist', edgecolor='black', bins=1081) # species_id 히스토그램
+# plt.xlabel('speci')
+#plt.ylabel('Frequency')
+#plt.show()
+
+
+#--------------------------------------------------------------
+#헬퍼
+import torch
+import os
+import random
+
+
+plt.style.use('ggplot')
+
+
+best_model_path = f'{output_path}models/best_model.pth'
+
+
+class SaveBestModel:
+    """
+    Class to save the best model while training. If the current epoch's
+    validation loss is less than the previous least less, then save the
+    model state.
+    """
+    def __init__(
+        self, best_valid_loss=float('inf')
+    ):
+        self.best_valid_loss = best_valid_loss
+       
+    def __call__(
+        self, current_valid_loss,
+        epoch, model, optimizer, criterion
+    ):
+        if current_valid_loss >= self.best_valid_loss:
+            return
+
+
+        self.best_valid_loss = current_valid_loss
+        print(f"\nBest validation loss: {self.best_valid_loss}")
+        print(f"\nSaving best model for epoch: {epoch+1}\n")
+        torch.save({
+            'epoch': epoch+1,
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'loss': criterion,
+        }, best_model_path)
+       
+
+
+def load_best_model():
+    return torch.load(best_model_path)
+
+
+def save_model(epochs, model, optimizer, criterion):
+    """
+    Function to save the trained model to disk.
+    """
+    torch.save({
+        'epoch': epochs,
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+        'loss': criterion,
+    }, f'{output_path}models/model_{epochs}.pth')
+
+
+
+
+
+
+def show_species_sample(species_id):
+    # List all files in the directory
+    directory_path = f"{input_path}images_train/{species_id}/"
+    all_files = os.listdir(directory_path)
+
+
+    # Filter out any non-image files if needed (e.g., based on file extension)
+    image_files = [f for f in all_files if f.lower().endswith(('jpg'))]
+
+
+    # Select a random image file
+    random_image_file = random.choice(image_files)
+
+
+    # Open and display the image
+    image_path = os.path.join(directory_path, random_image_file)
+    image = Image.open(image_path)
+#     plt.imshow(image)
+#     plt.axis('off')  # Hide the axis values
+#     plt.show()
+    return image
+#--------------------------------------------------------------
+# 모델과 데이터 불러옴
+import torch.nn as nn
+from torch.utils.data import DataLoader, Subset
+import torchvision.datasets as datasets
+from torchvision import transforms
+
+# --- 기본 경로 및 폴더 생성 ---
+base_input_path = '/home/ain/Documents/PlantNet/'
+input_path = f'{base_input_path}plantnet_300K/'
+output_path = f'{base_input_path}output_data/'
+
+# 모델 저장할 폴더가 없으면 생성
+os.makedirs(f'{output_path}models', exist_ok=True)
+
+# --- 데이터 변환 및 로드 ---
+train_transform = transforms.Compose([
+    transforms.Resize((256, 256)),
+    transforms.RandomHorizontalFlip(p=0.5),
+    transforms.RandomVerticalFlip(p=0.5),
+    transforms.GaussianBlur(kernel_size=(5, 9), sigma=(0.1, 5)),
+    transforms.RandomRotation(45),
+    transforms.ToTensor(),
+    transforms.Normalize(
+        mean=[0.5, 0.5, 0.5],
+        std=[0.5, 0.5, 0.5]
+    ),
+    transforms.RandomCrop(224) #random on training, center on validation
+])
+
+
+
+
+valid_transform = transforms.Compose([
+    transforms.Resize(256),
+    transforms.ToTensor(),
+    transforms.Normalize(
+        mean=[0.5, 0.5, 0.5],
+        std=[0.5, 0.5, 0.5]
+    ),
+    transforms.CenterCrop(224)
+])
+
+
+train_dataset = datasets.ImageFolder(
+    root=f'{input_path}images_train/',
+    transform=train_transform
+)
+
+
+test_dataset = datasets.ImageFolder(
+    root=f'{input_path}images_test/',
+    transform=valid_transform
+)
+
+
+
+batch_size = 32
+subset = None
+train_subset = None
+test_subset = None
+
+
+# subset for quick iteration, disable once tested
+# this is probably class imbalanced due to the nature of Subset not taking a stratified sample, but it is probably good enough for now.
+# additionally, the way the test_dataset is subset is naive and may not be a good comparison size relative to train_dataset. i.e.
+# the subset should probably be a percentage, rather than a fixed number
+if subset is not None:
+    print(f"subsetting data to {subset} results")
+    train_subset_indices = list(range(subset if subset < len(train_dataset) else len(train_dataset)))
+    train_subset = Subset(train_dataset, train_subset_indices)
+
+
+    test_subset_indices = list(range(subset if subset < len(test_dataset) else len(test_dataset)))
+    test_subset = Subset(test_dataset, test_subset_indices)
+
+
+# training data loaders
+train_loader = DataLoader(
+    train_dataset if train_subset is None else train_subset, batch_size=batch_size, shuffle=True,
+    num_workers=2, pin_memory=True
+)
+# validation data loaders
+test_loader = DataLoader(
+    test_dataset if test_subset is None else test_subset, batch_size=batch_size, shuffle=False,
+    num_workers=2, pin_memory=True
+)
+
+
+import torch
+import torch.nn as nn
+# import torch.hub # 모델 저장경로, 이름 설정
+# torch.hub.set_dir('/home/ain/Documents/PlantNet/model')
+model = torch.hub.load('pytorch/vision:v0.10.0', 'alexnet', pretrained=True)
+
+
+num_classes = len(species_names)
+model.classifier[-1] = torch.nn.Linear(4096, num_classes)
+
+
+for param in model.parameters():
+    param.requires_grad = False
+
+
+for param in model.classifier[6].parameters():
+    param.requires_grad = True
+
+
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+model= nn.DataParallel(model)
+model.to(device)
+
+# 훈련 및 검증 로직
+import torch.optim as optim
+
+# 손실 함수와 옵티마이저 정의
+criterion = nn.CrossEntropyLoss()
+optimizer = optim.Adam(model.parameters(), lr=0.001)
+
+# SaveBestModel 인스턴스 생성
+save_best_model = SaveBestModel()
+
+# 훈련 및 검증 루프
+epochs = 10  # 예시 에포크 수
+
+for epoch in range(epochs):
+    # 모델 훈련
+    model.train()
+    train_loss = 0.0
+    for i, (images, labels) in enumerate(train_loader):
+        images, labels = images.to(device), labels.to(device)
+
+        optimizer.zero_grad()
+        outputs = model(images)
+        loss = criterion(outputs, labels)
+        loss.backward()
+        optimizer.step()
+        train_loss += loss.item()
+
+    # 모델 검증
+    model.eval()
+    valid_loss = 0.0
+    with torch.no_grad():
+        for images, labels in test_loader:
+            images, labels = images.to(device), labels.to(device)
+            outputs = model(images)
+            loss = criterion(outputs, labels)
+            valid_loss += loss.item()
+
+    # 평균 손실 계산
+    avg_train_loss = train_loss / len(train_loader)
+    avg_valid_loss = valid_loss / len(test_loader)
+    
+    print(f"Epoch {epoch+1}/{epochs}, Train Loss: {avg_train_loss:.4f}, Validation Loss: {avg_valid_loss:.4f}")
+
+    # 최고의 모델 저장
+    save_best_model(avg_valid_loss, epoch, model, optimizer, criterion)
+    print(torch.hub.get_dir())
+
+# 마지막 에포크의 모델 저장 (선택 사항)
+# save_model(epochs, model, optimizer, criterion)
