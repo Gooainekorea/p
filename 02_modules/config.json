@@ -1,0 +1,19 @@
+{
+  "path": {
+    "base_input_path": "D:/ain/PlantNet/",
+    "input_path": "D:/ain/PlantNet/plantnet_300K/",
+    "output_path": "D:/ain/PlantNet/output_data/",
+    "metadata_path": "D:/ain/PlantNet/plantnet_300K/plantnet300K_metadata.json",
+    "species_names_path": "D:/ain/PlantNet/plantnet_300K/plantnet300K_species_id_2_name.json",
+    "model_save_dir": "D:/ain/PlantNet/output_data/models"
+  },
+  "hyperparameter": {
+    "batch_size": 32,
+    "learning_rate": 0.001,
+    "num_classes": 1081,
+    "epochs": 20
+  },
+  "library": {
+    "use_torch": true
+  }
+}
