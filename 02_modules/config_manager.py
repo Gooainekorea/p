@@ -37,9 +37,9 @@ class ConfigManager:
     def hyperparameter(self):
         return self._config_data.get('hyperparameter', {})
 
-    @property
-    def library(self):
-        return self._config_data.get('library', {})
+    # @property
+    # def library(self):
+    #     return self._config_data.get('library', {})
 
     def get_all_config(self):
         return self._config_data
